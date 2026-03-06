@@ -51,7 +51,7 @@ if [ ! -f "$PORTFILE" ]; then
 fi
 
 # Replace vcpkg_from_github with vcpkg_from_git and rewrite parameters
-python3 << 'PYEOF'
+python3 - "$PORTFILE" "$GIT_URL" "$REF_HASH" << 'PYEOF'
 import re
 import sys
 
@@ -91,6 +91,5 @@ with open(portfile, 'w') as f:
 
 print(f"Portfile updated: vcpkg_from_git with URL={git_url} REF={ref_hash}")
 PYEOF
-"$PORTFILE" "$GIT_URL" "$REF_HASH"
 
 echo "Done! Overlay port created at $DEST_PORT"
