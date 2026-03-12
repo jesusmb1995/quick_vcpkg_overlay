@@ -45,7 +45,7 @@ fi
 
 REGISTRY_PATH="$1"
 PORT_NAME="$2"
-NEW_VERSION="$3"
+NEW_VERSION="${3#v}"
 
 PORTFILE="$REGISTRY_PATH/ports/$PORT_NAME/portfile.cmake"
 VCPKG_JSON="$REGISTRY_PATH/ports/$PORT_NAME/vcpkg.json"
