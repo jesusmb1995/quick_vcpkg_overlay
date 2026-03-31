@@ -2,11 +2,17 @@
 
 # Automate port version bumps in a vcpkg registry using stacked git (stg).
 #
-# Usage: ./new_port_version.sh <registry_path> <port_name> <new_version>
+# Usage: ./new_port_version.sh [--hash <commit_hash>] <registry_path> <port_name> <new_version>
 # Example: ./new_port_version.sh /luksmap/Code/qvac-registry-vcpkg qvac-lib-inference-addon-cpp 1.1.4
+#          ./new_port_version.sh --hash 1458dd26 /luksmap/Code/qvac-registry-vcpkg qvac-lib-inference-addon-cpp 1.1.4
 #
 # Step 1 (stg patch): Updates portfile.cmake REF and vcpkg.json version
 # Step 2 (stg patch): Adds version entry to versions/<x>-/<port>.json and updates baseline.json
+#
+# Options:
+#   --hash <commit_hash>  Use this commit hash directly as the new REF instead of
+#                         resolving from a git tag. Useful for monorepo ports where
+#                         the REF is a repo-wide commit, not a per-package tag.
 
 set -e
 
@@ -22,11 +28,16 @@ warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 err()   { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 usage() {
-    echo "Usage: $0 <registry_path> <port_name> <new_version>"
+    echo "Usage: $0 [--hash <commit_hash>] <registry_path> <port_name> <new_version>"
     echo ""
     echo "Creates two stg patches in the registry:"
     echo "  1. Updates portfile.cmake (REF/SHA512) and vcpkg.json (version)"
     echo "  2. Adds entry to versions/<x>-/<port>.json and updates baseline.json"
+    echo ""
+    echo "Options:"
+    echo "  --hash <commit_hash>  Use this commit hash as the new REF directly,"
+    echo "                        skipping tag resolution. For monorepo ports where"
+    echo "                        the commit is not tied to a per-package tag."
     echo ""
     echo "Arguments:"
     echo "  registry_path  Path to the vcpkg registry (e.g. /luksmap/Code/qvac-registry-vcpkg)"
@@ -34,11 +45,20 @@ usage() {
     echo "  new_version    New version string (e.g. 1.1.4)"
     echo ""
     echo "Examples:"
-    echo "  $0 /luksmap/Code/qvac-registry-vcpkg qvac-lib-inference-addon-cpp 1.1.4"
     echo "  $0 /luksmap/Code/qvac-registry-vcpkg qvac-fabric 7248.1.4"
+    echo "  $0 --hash 1458dd269bf8fda8fd7a600389bde96c0e6274c6 /luksmap/Code/qvac-registry-vcpkg qvac-lib-inference-addon-cpp 1.1.4"
 }
 
-if [ $# -ne 3 ]; then
+EXPLICIT_HASH=""
+
+if [ "$1" = "--hash" ]; then
+    if [ $# -ne 5 ]; then
+        usage
+        exit 1
+    fi
+    EXPLICIT_HASH="$2"
+    shift 2
+elif [ $# -ne 3 ]; then
     usage
     exit 1
 fi
@@ -132,22 +152,28 @@ resolve_vcpkg_from_git_ref() {
 
     info "Source URL: $SOURCE_URL"
     info "Current REF: $CURRENT_REF"
-    info "Resolving tag v${NEW_VERSION} to commit hash..."
 
-    NEW_REF=$(git ls-remote --tags "$SOURCE_URL" "refs/tags/v${NEW_VERSION}" 2>/dev/null | awk '{print $1}')
-    if [ -z "$NEW_REF" ]; then
-        info "Tag v${NEW_VERSION} not found, trying ${NEW_VERSION}..."
-        NEW_REF=$(git ls-remote --tags "$SOURCE_URL" "refs/tags/${NEW_VERSION}" 2>/dev/null | awk '{print $1}')
+    if [ -n "$EXPLICIT_HASH" ]; then
+        NEW_REF="$EXPLICIT_HASH"
+        info "Using explicit hash: $NEW_REF"
+    else
+        info "Resolving tag v${NEW_VERSION} to commit hash..."
+
+        NEW_REF=$(git ls-remote --tags "$SOURCE_URL" "refs/tags/v${NEW_VERSION}" 2>/dev/null | awk '{print $1}')
+        if [ -z "$NEW_REF" ]; then
+            info "Tag v${NEW_VERSION} not found, trying ${NEW_VERSION}..."
+            NEW_REF=$(git ls-remote --tags "$SOURCE_URL" "refs/tags/${NEW_VERSION}" 2>/dev/null | awk '{print $1}')
+        fi
+
+        if [ -z "$NEW_REF" ]; then
+            err "Could not resolve tag for version ${NEW_VERSION} in $SOURCE_URL"
+            echo "  Available tags:"
+            git ls-remote --tags "$SOURCE_URL" 2>/dev/null | tail -5
+            exit 1
+        fi
+
+        info "Resolved to REF: $NEW_REF"
     fi
-
-    if [ -z "$NEW_REF" ]; then
-        err "Could not resolve tag for version ${NEW_VERSION} in $SOURCE_URL"
-        echo "  Available tags:"
-        git ls-remote --tags "$SOURCE_URL" 2>/dev/null | tail -5
-        exit 1
-    fi
-
-    info "Resolved to REF: $NEW_REF"
     SKIP_REF_UPDATE=false
 }
 
